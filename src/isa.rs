@@ -572,7 +572,10 @@ impl<'a> Instruction<'a> {
                 vtype: VarType::I32,
             },
             Instruction::I32DivS => todo!(),
-            Instruction::I32DivU => todo!(),
+            Instruction::I32DivU => Opcode::Bin {
+                class: BinOp::Div,
+                vtype: VarType::I32,
+            },
             Instruction::I32RemS => todo!(),
             Instruction::I32RemU => todo!(),
             Instruction::I32And => Opcode::BinBit {
