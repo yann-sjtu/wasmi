@@ -633,6 +633,7 @@ impl Interpreter {
             | isa::Instruction::I32Mul
             | isa::Instruction::I32Shl
             | isa::Instruction::I32ShrU
+            | isa::Instruction::I32ShrS
             | isa::Instruction::I32And
             | isa::Instruction::I32Or
             | isa::Instruction::I32Xor
@@ -1136,6 +1137,19 @@ impl Interpreter {
                 if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinShiftOp {
                         class: ShiftOp::UnsignedShr,
+                        left,
+                        right,
+                        value: <_>::from_value_internal(*self.value_stack.top()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
+            isa::Instruction::I32ShrS => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinShiftOp {
+                        class: ShiftOp::SignedShr,
                         left,
                         right,
                         value: <_>::from_value_internal(*self.value_stack.top()),
