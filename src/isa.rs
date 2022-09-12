@@ -72,7 +72,7 @@ use std::collections::HashMap;
 use alloc::vec::Vec;
 use parity_wasm::elements::ValueType;
 use specs::{
-    itable::{BinOp, BitOp, ConversionOp, Opcode, RelOp, ShiftOp, TestOp},
+    itable::{BinSignedOp, BinOp, BitOp, ConversionOp, Opcode, RelOp, ShiftOp, TestOp},
     mtable::{MemoryReadSize, MemoryStoreSize, VarType},
 };
 
@@ -567,11 +567,15 @@ impl<'a> Instruction<'a> {
                 class: BinOp::Mul,
                 vtype: VarType::I32,
             },
-            Instruction::I32DivS => todo!(),
             Instruction::I32DivU => Opcode::Bin {
                 class: BinOp::Div,
                 vtype: VarType::I32,
             },
+            Instruction::I32DivS => Opcode::BinSigned {
+                class: BinSignedOp::DivS,
+                vtype: VarType::I32,
+            },
+
             Instruction::I32RemS => todo!(),
             Instruction::I32RemU => todo!(),
             Instruction::I32And => Opcode::BinBit {
@@ -611,9 +615,18 @@ impl<'a> Instruction<'a> {
                 class: BinOp::Sub,
                 vtype: VarType::I64,
             },
-            Instruction::I64Mul => todo!(),
-            Instruction::I64DivS => todo!(),
-            Instruction::I64DivU => todo!(),
+            Instruction::I64Mul => Opcode::Bin {
+                class: BinOp::Mul,
+                vtype: VarType::I64,
+            },
+            Instruction::I64DivU => Opcode::Bin {
+                class: BinOp::Div,
+                vtype: VarType::I64,
+            },
+            Instruction::I64DivS => Opcode::BinSigned {
+                class: BinSignedOp::DivS,
+                vtype: VarType::I64,
+            },
             Instruction::I64RemS => todo!(),
             Instruction::I64RemU => todo!(),
             Instruction::I64And => todo!(),
