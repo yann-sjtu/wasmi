@@ -576,7 +576,10 @@ impl<'a> Instruction<'a> {
                 vtype: VarType::I32,
             },
 
-            Instruction::I32RemS => todo!(),
+            Instruction::I32RemS =>  Opcode::BinSigned {
+                class: BinSignedOp::RemS,
+                vtype: VarType::I32,
+            },
             Instruction::I32RemU => todo!(),
             Instruction::I32And => Opcode::BinBit {
                 class: BitOp::And,
@@ -627,7 +630,10 @@ impl<'a> Instruction<'a> {
                 class: BinSignedOp::DivS,
                 vtype: VarType::I64,
             },
-            Instruction::I64RemS => todo!(),
+            Instruction::I64RemS => Opcode::BinSigned {
+                class: BinSignedOp::RemS,
+                vtype: VarType::I64,
+            },
             Instruction::I64RemU => todo!(),
             Instruction::I64And => todo!(),
             Instruction::I64Or => Opcode::BinBit {

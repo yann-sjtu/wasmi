@@ -626,6 +626,7 @@ impl Interpreter {
             | isa::Instruction::I32Mul
             | isa::Instruction::I32DivU
             | isa::Instruction::I32DivS
+            | isa::Instruction::I32RemS
             | isa::Instruction::I32Shl
             | isa::Instruction::I32ShrU
             | isa::Instruction::I32And
@@ -638,6 +639,7 @@ impl Interpreter {
 
             isa::Instruction::I64Add
             | isa::Instruction::I64Sub
+            | isa::Instruction::I64RemS
             | isa::Instruction::I64Shl
             | isa::Instruction::I64ShrU
             | isa::Instruction::I64Or => Some(RunInstructionTracePre::I64BinOp {
@@ -1100,6 +1102,19 @@ impl Interpreter {
                     unreachable!()
                 }
             }
+            isa::Instruction::I32RemS => {
+                if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I32BinSignedOp {
+                        class: BinSignedOp::RemS,
+                        left,
+                        right,
+                        value: <_>::from_value_internal(*self.value_stack.top()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
             isa::Instruction::I32And => {
                 if let RunInstructionTracePre::I32BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I32BinBitOp {
@@ -1197,6 +1212,19 @@ impl Interpreter {
                     unreachable!()
                 }
             }
+            isa::Instruction::I64RemS => {
+                if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
+                    StepInfo::I64BinSignedOp {
+                        class: BinSignedOp::RemS,
+                        left,
+                        right,
+                        value: <_>::from_value_internal(*self.value_stack.top()),
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+
             isa::Instruction::I64Or => {
                 if let RunInstructionTracePre::I64BinOp { left, right } = pre_status.unwrap() {
                     StepInfo::I64BinBitOp {
