@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use specs::{host_function::HostFunctionDesc, mtable::VarType, types::FunctionType};
+use specs::{
+    host_function::HostFunctionDesc,
+    types::{FunctionType, ValueType},
+};
 
 use crate::{
     runner::{from_value_internal_to_u64_with_typ, ValueInternal},
@@ -116,7 +119,7 @@ impl Tracer {
                 true,
                 self.next_memory_id(),
                 i,
-                VarType::I64,
+                ValueType::I64,
                 u64::from_le_bytes(buf),
             );
         }

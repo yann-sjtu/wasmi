@@ -73,7 +73,8 @@ use alloc::vec::Vec;
 use parity_wasm::elements::ValueType;
 use specs::{
     itable::{BinOp, BitOp, ConversionOp, Opcode, RelOp, ShiftOp, TestOp},
-    mtable::{MemoryReadSize, MemoryStoreSize, VarType},
+    mtable::{MemoryReadSize, MemoryStoreSize},
+    types::ValueType as VarType,
 };
 
 use crate::tracer::FuncDesc;

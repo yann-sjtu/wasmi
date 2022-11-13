@@ -30,8 +30,9 @@ use core::{cell::RefCell, fmt, ops, u32, usize};
 use parity_wasm::elements::Local;
 use specs::{
     itable::{BinOp, BitOp, RelOp, ShiftOp},
-    mtable::{MemoryReadSize, MemoryStoreSize, VarType},
+    mtable::{MemoryReadSize, MemoryStoreSize},
     step::StepInfo,
+    types::ValueType as VarType,
 };
 use std::rc::Rc;
 use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
