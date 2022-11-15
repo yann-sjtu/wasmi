@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use specs::{
+use zkwasm_types::{
     host_function::HostFunctionDesc,
     imtable::{InitMemoryTable, InitMemoryTableEntry},
     itable::{InstructionTable, InstructionTableEntry},

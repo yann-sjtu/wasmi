@@ -71,10 +71,10 @@ use std::collections::HashMap;
 
 use alloc::vec::Vec;
 use parity_wasm::elements::ValueType;
-use specs::{
+use zkwasm_types::{
     itable::{BinOp, BitOp, ConversionOp, Opcode, RelOp, ShiftOp, TestOp},
     mtable::{MemoryReadSize, MemoryStoreSize},
-    types::ValueType as VarType,
+    types::{FunctionType, ValueType as VarType},
 };
 
 use crate::tracer::FuncDesc;
@@ -407,13 +407,13 @@ impl<'a> Instruction<'a> {
                 let func_desc = function_mapping.get(&func_index).unwrap();
 
                 match &func_desc.ftype {
-                    specs::types::FunctionType::WasmFunction => Opcode::Call {
+                    FunctionType::WasmFunction => Opcode::Call {
                         index: function_mapping
                             .get(&func_index)
                             .unwrap()
                             .index_within_jtable,
                     },
-                    specs::types::FunctionType::HostFunction {
+                    FunctionType::HostFunction {
                         plugin,
                         function_index,
                         function_name,

@@ -71,9 +71,9 @@ impl Signature {
     }
 }
 
-impl Into<specs::host_function::Signature> for Signature {
-    fn into(self) -> specs::host_function::Signature {
-        specs::host_function::Signature {
+impl Into<zkwasm_types::host_function::Signature> for Signature {
+    fn into(self) -> zkwasm_types::host_function::Signature {
+        zkwasm_types::host_function::Signature {
             params: self
                 .params()
                 .iter()

@@ -28,15 +28,15 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use core::{cell::RefCell, fmt, ops, u32, usize};
 use parity_wasm::elements::Local;
-use specs::{
+use std::rc::Rc;
+use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
+use zkwasm_types::{
     itable::{BinOp, BitOp, RelOp, ShiftOp},
     jtable::FrameTableEntry,
     mtable::{MemoryReadSize, MemoryStoreSize},
     step::StepInfo,
-    types::ValueType as VarType,
+    types::{FunctionType, ValueType as VarType},
 };
-use std::rc::Rc;
-use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
 
 /// Maximum number of bytes on the value stack.
 /// wasmi's default value is 1024 * 1024, we set 4096 to adapt zkWasm
@@ -894,10 +894,10 @@ impl Interpreter {
                     let desc = tracer.function_index_translation.get(&index).unwrap();
 
                     match &desc.ftype {
-                        specs::types::FunctionType::WasmFunction => StepInfo::Call {
+                        FunctionType::WasmFunction => StepInfo::Call {
                             index: desc.index_within_jtable,
                         },
-                        specs::types::FunctionType::HostFunction {
+                        FunctionType::HostFunction {
                             plugin,
                             function_index: host_function_idx,
                             function_name,
@@ -905,7 +905,7 @@ impl Interpreter {
                         } => {
                             let params_len = desc.signature.params().len();
                             let mut args: Vec<u64> = vec![];
-                            let signature: specs::host_function::Signature =
+                            let signature: zkwasm_types::host_function::Signature =
                                 desc.signature.clone().into();
                             let params = signature.params.clone();
                             for i in 0..params_len {

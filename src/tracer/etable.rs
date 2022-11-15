@@ -1,5 +1,5 @@
 use parity_wasm::elements::ValueType;
-use specs::{
+use zkwasm_types::{
     etable::EventTableEntry,
     itable::{InstructionTableEntry, Opcode},
     mtable::{MemoryReadSize, MemoryStoreSize},
