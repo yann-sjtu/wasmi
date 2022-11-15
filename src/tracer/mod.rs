@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use specs::{
     host_function::HostFunctionDesc,
+    itable::{InstructionTable, InstructionTableEntry},
     types::{FunctionType, ValueType},
 };
 
@@ -15,16 +16,10 @@ use crate::{
     Signature,
 };
 
-use self::{
-    etable::ETable,
-    imtable::IMTable,
-    itable::{IEntry, ITable},
-    jtable::JTable,
-};
+use self::{etable::ETable, imtable::IMTable, jtable::JTable};
 
 pub mod etable;
 pub mod imtable;
-pub mod itable;
 pub mod jtable;
 
 #[derive(Debug)]
@@ -36,7 +31,7 @@ pub struct FuncDesc {
 
 #[derive(Debug)]
 pub struct Tracer {
-    pub itable: ITable,
+    pub itable: InstructionTable,
     pub imtable: IMTable,
     pub etable: ETable,
     pub jtable: JTable,
@@ -54,7 +49,7 @@ impl Tracer {
     /// Create an empty tracer
     pub fn new(host_plugin_lookup: HashMap<usize, HostFunctionDesc>) -> Self {
         Tracer {
-            itable: ITable::default(),
+            itable: InstructionTable::new(),
             imtable: IMTable::default(),
             etable: ETable::default(),
             last_jump_eid: vec![0],
@@ -243,12 +238,17 @@ impl Tracer {
                         loop {
                             let pc = iter.position();
                             if let Some(instruction) = iter.next() {
-                                let _ = self.itable.push(
-                                    self.next_module_id() as u32,
-                                    funcdesc.index_within_jtable,
-                                    pc,
-                                    instruction.into(&self.function_index_translation),
-                                );
+                                let moid = self.next_module_id();
+
+                                let ientry = InstructionTableEntry {
+                                    moid,
+                                    mmid: moid,
+                                    fid: funcdesc.index_within_jtable,
+                                    iid: pc.try_into().unwrap(),
+                                    opcode: instruction.into(&self.function_index_translation),
+                                };
+
+                                self.itable.push(&ientry);
                             } else {
                                 break;
                             }
@@ -305,11 +305,11 @@ impl Tracer {
         self.function_lookup.get(pos).unwrap().1
     }
 
-    pub fn lookup_ientry(&self, function: &FuncRef, pos: u32) -> IEntry {
+    pub fn lookup_ientry(&self, function: &FuncRef, pos: u32) -> InstructionTableEntry {
         let function_idx = self.lookup_function(function);
 
         for ientry in &self.itable.0 {
-            if ientry.func_index as u16 == function_idx && ientry.pc as u32 == pos {
+            if ientry.fid == function_idx && ientry.iid as u32 == pos {
                 return ientry.clone();
             }
         }
@@ -317,11 +317,11 @@ impl Tracer {
         unreachable!()
     }
 
-    pub fn lookup_first_inst(&self, function: &FuncRef) -> IEntry {
+    pub fn lookup_first_inst(&self, function: &FuncRef) -> InstructionTableEntry {
         let function_idx = self.lookup_function(function);
 
         for ientry in &self.itable.0 {
-            if ientry.func_index as u16 == function_idx {
+            if ientry.fid == function_idx {
                 return ientry.clone();
             }
         }

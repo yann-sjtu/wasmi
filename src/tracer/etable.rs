@@ -1,14 +1,12 @@
 use parity_wasm::elements::ValueType;
 use specs::{
     etable::EventTableEntry,
-    itable::Opcode,
+    itable::{InstructionTableEntry, Opcode},
     mtable::{MemoryReadSize, MemoryStoreSize},
     step::StepInfo,
 };
 
 use crate::{runner::ValueInternal, DEFAULT_VALUE_STACK_LIMIT};
-
-use super::itable::IEntry;
 
 pub enum RunInstructionTracePre {
     BrIfEqz {
@@ -96,7 +94,7 @@ pub struct EEntry {
     pub id: u64,
     pub sp: u64,
     pub last_jump_eid: u64,
-    pub inst: IEntry,
+    pub inst: InstructionTableEntry,
     pub step: StepInfo,
 }
 
@@ -160,10 +158,11 @@ impl ETable {
             id: self.allocate_eid(),
             sp,
             last_jump_eid,
-            inst: IEntry {
-                module_instance_index: module_instance_index as u16,
-                func_index,
-                pc: pc as u16,
+            inst: InstructionTableEntry {
+                moid: module_instance_index,
+                mmid: module_instance_index,
+                fid: func_index,
+                iid: pc.try_into().unwrap(),
                 opcode,
             },
             step,

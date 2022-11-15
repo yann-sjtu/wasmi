@@ -1,19 +1,17 @@
-use specs::jtable::JumpTableEntry;
-
-use super::itable::IEntry;
+use specs::{itable::InstructionTableEntry, jtable::JumpTableEntry};
 
 #[derive(Debug, Clone)]
 pub struct JEntry {
     eid: u64,
     last_jump_eid: u64,
-    inst: IEntry,
+    inst: InstructionTableEntry,
 }
 
 #[derive(Debug, Default)]
 pub struct JTable(pub Vec<JEntry>);
 
 impl JTable {
-    pub fn push(&mut self, eid: u64, last_jump_eid: u64, inst: &IEntry) {
+    pub fn push(&mut self, eid: u64, last_jump_eid: u64, inst: &InstructionTableEntry) {
         self.0.push(JEntry {
             eid,
             last_jump_eid,
