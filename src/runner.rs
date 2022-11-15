@@ -30,6 +30,7 @@ use core::{cell::RefCell, fmt, ops, u32, usize};
 use parity_wasm::elements::Local;
 use specs::{
     itable::{BinOp, BitOp, RelOp, ShiftOp},
+    jtable::FrameTableEntry,
     mtable::{MemoryReadSize, MemoryStoreSize},
     step::StepInfo,
     types::ValueType as VarType,
@@ -335,7 +336,12 @@ impl Interpreter {
                                     function_context.position,
                                 );
 
-                                tracer.jtable.push(eid, last_jump_eid, &inst);
+                                let frame_entry = FrameTableEntry {
+                                    eid,
+                                    last_jump_eid,
+                                    inst: Box::new(inst),
+                                };
+                                tracer.jtable.push(&frame_entry);
 
                                 tracer.push_frame();
                             }

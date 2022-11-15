@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use specs::{
     host_function::HostFunctionDesc,
     itable::{InstructionTable, InstructionTableEntry},
+    jtable::FrameTable,
     types::{FunctionType, ValueType},
 };
 
@@ -16,11 +17,10 @@ use crate::{
     Signature,
 };
 
-use self::{etable::ETable, imtable::IMTable, jtable::JTable};
+use self::{etable::ETable, imtable::IMTable};
 
 pub mod etable;
 pub mod imtable;
-pub mod jtable;
 
 #[derive(Debug)]
 pub struct FuncDesc {
@@ -34,7 +34,7 @@ pub struct Tracer {
     pub itable: InstructionTable,
     pub imtable: IMTable,
     pub etable: ETable,
-    pub jtable: JTable,
+    pub jtable: FrameTable,
     module_instance_lookup: Vec<(ModuleRef, u16)>,
     memory_instance_lookup: Vec<(MemoryRef, u16)>,
     global_instance_lookup: Vec<(GlobalRef, (u16, u16))>,
@@ -53,7 +53,7 @@ impl Tracer {
             imtable: IMTable::default(),
             etable: ETable::default(),
             last_jump_eid: vec![0],
-            jtable: JTable::default(),
+            jtable: FrameTable::default(),
             module_instance_lookup: vec![],
             memory_instance_lookup: vec![],
             global_instance_lookup: vec![],
