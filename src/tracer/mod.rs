@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use specs::{
     host_function::HostFunctionDesc,
+    imtable::{InitMemoryTable, InitMemoryTableEntry},
     itable::{InstructionTable, InstructionTableEntry},
     jtable::FrameTable,
+    mtable::LocationType,
     types::{FunctionType, ValueType},
 };
 
@@ -17,10 +19,9 @@ use crate::{
     Signature,
 };
 
-use self::{etable::ETable, imtable::IMTable};
+use self::etable::ETable;
 
 pub mod etable;
-pub mod imtable;
 
 #[derive(Debug)]
 pub struct FuncDesc {
@@ -32,7 +33,7 @@ pub struct FuncDesc {
 #[derive(Debug)]
 pub struct Tracer {
     pub itable: InstructionTable,
-    pub imtable: IMTable,
+    pub imtable: InitMemoryTable,
     pub etable: ETable,
     pub jtable: FrameTable,
     module_instance_lookup: Vec<(ModuleRef, u16)>,
@@ -50,7 +51,7 @@ impl Tracer {
     pub fn new(host_plugin_lookup: HashMap<usize, HostFunctionDesc>) -> Self {
         Tracer {
             itable: InstructionTable::new(),
-            imtable: IMTable::default(),
+            imtable: InitMemoryTable::new(),
             etable: ETable::default(),
             last_jump_eid: vec![0],
             jtable: FrameTable::default(),
@@ -109,14 +110,14 @@ impl Tracer {
         for i in 0..(pages * 8192) {
             let mut buf = [0u8; 8];
             (*memref).get_into(i * 8, &mut buf).unwrap();
-            self.imtable.push(
-                false,
-                true,
-                self.next_memory_id(),
-                i,
-                ValueType::I64,
-                u64::from_le_bytes(buf),
-            );
+            self.imtable.push(&InitMemoryTableEntry {
+                ltype: LocationType::Heap,
+                is_mutable: true,
+                mmid: self.next_memory_id().try_into().unwrap(),
+                offset: i.try_into().unwrap(),
+                vtype: ValueType::I64,
+                value: u64::from_le_bytes(buf),
+            });
         }
 
         self.memory_instance_lookup
@@ -133,14 +134,17 @@ impl Tracer {
             self.global_instance_lookup
                 .push((globalref.clone(), (moid, globalidx as u16)));
 
-            self.imtable.push(
-                true,
-                globalref.is_mutable(),
-                moid,
-                globalidx,
+            self.imtable.push(&InitMemoryTableEntry {
+                ltype: LocationType::Global,
+                is_mutable: globalref.is_mutable(),
+                mmid: moid.try_into().unwrap(),
+                offset: globalidx.try_into().unwrap(),
                 vtype,
-                from_value_internal_to_u64_with_typ(vtype, ValueInternal::from(globalref.get())),
-            )
+                value: from_value_internal_to_u64_with_typ(
+                    vtype,
+                    ValueInternal::from(globalref.get()),
+                ),
+            });
         }
     }
 
