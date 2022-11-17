@@ -720,7 +720,7 @@ impl Interpreter {
                 value: from_value_internal_to_u64_with_typ(vtype.into(), *self.value_stack.top()),
                 vtype: vtype.into(),
             },
-            isa::Instruction::GetGlobal(idx) => {
+            isa::Instruction::GetGlobal(idx) | isa::Instruction::SetGlobal(idx) => {
                 let tracer = self.tracer.as_ref().unwrap().borrow();
 
                 let global_ref = context.module().global_by_index(idx).unwrap();
@@ -733,49 +733,25 @@ impl Interpreter {
 
                 let (origin_module, origin_idx) =
                     tracer.lookup_global_instance(&global_ref).unwrap();
-                let moid = tracer.lookup_module_instance(&context.module);
-                /*
-                 * TODO: imported global is not support yet.
-                 */
-                assert_eq!(origin_module, moid);
-                assert_eq!(origin_idx, idx as u16);
 
-                StepInfo::GetGlobal {
-                    idx,
-                    origin_module: moid,
-                    origin_idx: idx as u16,
-                    vtype,
-                    is_mutable,
-                    value,
-                }
-            }
-            isa::Instruction::SetGlobal(idx) => {
-                let tracer = self.tracer.as_ref().unwrap().borrow();
-
-                let global_ref = context.module().global_by_index(idx).unwrap();
-                let is_mutable = global_ref.is_mutable();
-                let vtype: VarType = global_ref.value_type().into_elements().into();
-                let value = from_value_internal_to_u64_with_typ(
-                    vtype.into(),
-                    ValueInternal::from(global_ref.get()),
-                );
-
-                let (origin_module, origin_idx) =
-                    tracer.lookup_global_instance(&global_ref).unwrap();
-                let moid = tracer.lookup_module_instance(&context.module);
-                /*
-                 * TODO: imported global is not support yet.
-                 */
-                assert_eq!(origin_module, moid);
-                assert_eq!(origin_idx, idx as u16);
-
-                StepInfo::SetGlobal {
-                    idx,
-                    origin_module: moid,
-                    origin_idx: idx as u16,
-                    vtype,
-                    is_mutable,
-                    value,
+                match *instructions {
+                    isa::Instruction::GetGlobal(_) => StepInfo::GetGlobal {
+                        idx,
+                        origin_module,
+                        origin_idx,
+                        vtype,
+                        is_mutable,
+                        value,
+                    },
+                    isa::Instruction::SetGlobal(_) => StepInfo::SetGlobal {
+                        idx,
+                        origin_module,
+                        origin_idx,
+                        vtype,
+                        is_mutable,
+                        value,
+                    },
+                    _ => unreachable!(),
                 }
             }
 
