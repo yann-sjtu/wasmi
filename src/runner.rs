@@ -496,7 +496,7 @@ impl Interpreter {
                 let raw_address = <_>::from_value_internal(*self.value_stack.top());
                 let address =
                     effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
-                let mmid = tracer.lookup_memory_instance(
+                let origin_mmid = tracer.lookup_memory_instance_origin(
                     &function_context
                         .memory
                         .clone()
@@ -509,7 +509,7 @@ impl Interpreter {
                     effective_address: address,
                     vtype: parity_wasm::elements::ValueType::I32,
                     load_size,
-                    mmid: mmid as u64,
+                    origin_mmid,
                 })
             }
             isa::Instruction::I64Load(offset) | isa::Instruction::I64Load8U(offset) => {
@@ -521,7 +521,7 @@ impl Interpreter {
                 let raw_address = <_>::from_value_internal(*self.value_stack.top());
                 let address =
                     effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
-                let mmid = tracer.lookup_memory_instance(
+                let origin_mmid = tracer.lookup_memory_instance_origin(
                     &function_context
                         .memory
                         .clone()
@@ -534,7 +534,7 @@ impl Interpreter {
                     effective_address: address,
                     vtype: parity_wasm::elements::ValueType::I64,
                     load_size,
-                    mmid: mmid as u64,
+                    origin_mmid,
                 })
             }
             isa::Instruction::I32Store(offset) | isa::Instruction::I32Store8(offset) => {
@@ -548,7 +548,8 @@ impl Interpreter {
                 let raw_address = <_>::from_value_internal(*self.value_stack.pick(2));
                 let address =
                     effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
-                let mmid = tracer.lookup_memory_instance(&function_context.memory.clone().unwrap());
+                let origin_mmid =
+                    tracer.lookup_memory_instance_origin(&function_context.memory.clone().unwrap());
 
                 let pre_block_value = address.map(|address| {
                     let mut buf = [0u8; 8];
@@ -568,7 +569,7 @@ impl Interpreter {
                     value: value as u64,
                     vtype: parity_wasm::elements::ValueType::I32,
                     store_size,
-                    mmid: mmid as u64,
+                    origin_mmid,
                     pre_block_value,
                 })
             }
@@ -583,7 +584,8 @@ impl Interpreter {
                 let raw_address = <_>::from_value_internal(*self.value_stack.pick(2));
                 let address =
                     effective_address(offset, raw_address).map_or(None, |addr| Some(addr));
-                let mmid = tracer.lookup_memory_instance(&function_context.memory.clone().unwrap());
+                let origin_mmid =
+                    tracer.lookup_memory_instance_origin(&function_context.memory.clone().unwrap());
 
                 let pre_block_value = address.map(|address| {
                     let mut buf = [0u8; 8];
@@ -603,7 +605,7 @@ impl Interpreter {
                     value,
                     vtype: parity_wasm::elements::ValueType::I64,
                     store_size,
-                    mmid: mmid as u64,
+                    origin_mmid,
                     pre_block_value,
                 })
             }
@@ -911,7 +913,7 @@ impl Interpreter {
                     effective_address,
                     vtype,
                     load_size,
-                    mmid,
+                    origin_mmid,
                 } = pre_status.unwrap()
                 {
                     let block_value = {
@@ -936,7 +938,7 @@ impl Interpreter {
                             *self.value_stack.top(),
                         ),
                         block_value,
-                        mmid,
+                        origin_mmid,
                     }
                 } else {
                     unreachable!()
@@ -953,7 +955,7 @@ impl Interpreter {
                     value,
                     vtype,
                     store_size,
-                    mmid,
+                    origin_mmid,
                     pre_block_value,
                 } = pre_status.unwrap()
                 {
@@ -975,7 +977,7 @@ impl Interpreter {
                         raw_address,
                         effective_address: effective_address.unwrap(),
                         value: value as u64,
-                        mmid,
+                        origin_mmid,
                         pre_block_value: pre_block_value.unwrap(),
                         updated_block_value,
                     }
