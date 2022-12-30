@@ -12,8 +12,8 @@ use parity_wasm::elements::{FunctionType, GlobalType, MemoryType, TableType};
 /// [function]: struct.FuncInstance.html
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature {
-    params: Cow<'static, [ValueType]>,
-    return_type: Option<ValueType>,
+    pub params: Cow<'static, [ValueType]>,
+    pub return_type: Option<ValueType>,
 }
 
 impl Signature {

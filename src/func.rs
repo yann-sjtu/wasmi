@@ -200,7 +200,10 @@ impl FuncInstance {
                 interpreter.tracer = Some(tracer);
                 interpreter.start_execution(externals)
             }
-            FuncInstanceInternal::Host { .. } => unreachable!(),
+            FuncInstanceInternal::Host {
+                ref host_func_index,
+                ..
+            } => externals.invoke_index(*host_func_index, args.into()),
         }
     }
 
