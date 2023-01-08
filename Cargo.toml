@@ -12,8 +12,8 @@ keywords = ["wasm", "webassembly", "bytecode", "interpreter"]
 exclude = [ "/res/*", "/tests/*", "/fuzz/*", "/benches/*" ]
 
 [dependencies]
-wasmi_core = { version = "0.1.0", path = "core", default-features = false }
-validation = { package = "wasmi-validation", version = "0.4", path = "validation", default-features = false }
+wasmi_core = { version = "0.2.0", path = "core", default-features = false }
+validation = { package = "wasmi-validation", version = "0.5", path = "validation", default-features = false }
 parity-wasm = { version = "0.45.0", default-features = false }
 specs = { path = "../specs" }
 
