@@ -1,5 +1,5 @@
+use alloc::vec::Vec;
 use core::cmp;
-
 use wasmi_core::ValueType;
 
 /// The value stack that is emulated during Wasm to `wasmi` bytecode translation.
@@ -87,11 +87,6 @@ impl ValueStack {
     /// Returns the current length of the emulated [`ValueStack`].
     pub fn len(&self) -> u32 {
         self.values.len() as u32
-    }
-
-    /// Returns `true` if the emulated [`ValueStack`] is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Shrinks the [`ValueStack`] to the given height.

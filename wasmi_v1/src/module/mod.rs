@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports)] // TODO: remove annotation once done
+use alloc::{boxed::Box, vec::Vec};
 
 mod builder;
 mod compile;
@@ -24,7 +24,7 @@ use self::{
     export::Export,
     global::Global,
     import::{Import, ImportKind},
-    init_expr::{InitExpr, InitExprOperand},
+    init_expr::InitExpr,
     parser::parse,
     read::ReadError,
 };
@@ -32,7 +32,7 @@ pub use self::{
     builder::ModuleResources,
     compile::BlockType,
     error::ModuleError,
-    export::{FuncIdx, MemoryIdx, TableIdx},
+    export::{ExportItem, ExportItemKind, FuncIdx, MemoryIdx, ModuleExportsIter, TableIdx},
     global::GlobalIdx,
     import::{FuncTypeIdx, ImportName},
     instantiate::{InstancePre, InstantiationError},
@@ -42,7 +42,6 @@ use crate::{
     engine::{DedupFuncType, FuncBody},
     Engine,
     Error,
-    FuncType,
     GlobalType,
     MemoryType,
     TableType,
@@ -164,6 +163,8 @@ impl Module {
     }
 
     /// Returns a slice over the [`FuncType`] of the [`Module`].
+    ///
+    /// [`FuncType`]: struct.FuncType.html
     fn func_types(&self) -> &[DedupFuncType] {
         &self.func_types[..]
     }
@@ -208,6 +209,11 @@ impl Module {
         InternalGlobalsIter {
             iter: globals.zip(global_inits),
         }
+    }
+
+    /// Returns an iterator over the exports of the [`Module`].
+    pub fn exports(&self) -> ModuleExportsIter {
+        ModuleExportsIter::new(self)
     }
 }
 

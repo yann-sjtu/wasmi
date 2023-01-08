@@ -3,7 +3,6 @@ use crate::{
     TrapCode,
 };
 use core::{f32, fmt, fmt::Display, i32, i64, u32, u64};
-use parity_wasm::elements as pwasm;
 
 /// Type of a value.
 ///
@@ -33,30 +32,6 @@ impl Display for ValueType {
     }
 }
 
-impl ValueType {
-    /// Converts into [`ValueType`] from [`pwasm::ValueType`].
-    #[inline]
-    pub fn from_elements(value_type: pwasm::ValueType) -> Self {
-        match value_type {
-            pwasm::ValueType::I32 => Self::I32,
-            pwasm::ValueType::I64 => Self::I64,
-            pwasm::ValueType::F32 => Self::F32,
-            pwasm::ValueType::F64 => Self::F64,
-        }
-    }
-
-    /// Converts from [`ValueType`] into [`pwasm::ValueType`].
-    #[inline]
-    pub fn into_elements(self) -> pwasm::ValueType {
-        match self {
-            Self::I32 => pwasm::ValueType::I32,
-            Self::I64 => pwasm::ValueType::I64,
-            Self::F32 => pwasm::ValueType::F32,
-            Self::F64 => pwasm::ValueType::F64,
-        }
-    }
-}
-
 /// Runtime representation of a value.
 ///
 /// Wasm code manipulate values of the four basic value types:
@@ -74,6 +49,17 @@ pub enum Value {
     F32(F32),
     /// Value of 64-bit IEEE 754-2008 floating point number.
     F64(F64),
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::I32(value) => write!(f, "{value}"),
+            Self::I64(value) => write!(f, "{value}"),
+            Self::F32(value) => write!(f, "{}", f32::from(*value)),
+            Self::F64(value) => write!(f, "{}", f64::from(*value)),
+        }
+    }
 }
 
 /// Trait for creating value from a [`Value`].
@@ -207,7 +193,7 @@ impl_little_endian_convert_float!(
 );
 
 /// Arithmetic operations.
-pub trait ArithmeticOps<T> {
+pub trait ArithmeticOps<T>: Copy {
     /// Add two values.
     fn add(self, other: T) -> T;
     /// Subtract two values.
@@ -251,10 +237,8 @@ pub trait Float<T>: ArithmeticOps<T> {
     /// Takes the square root of a number.
     fn sqrt(self) -> T;
     /// Returns `true` if the sign of the number is positive.
-    #[allow(clippy::wrong_self_convention)]
     fn is_sign_positive(self) -> bool;
     /// Returns `true` if the sign of the number is negative.
-    #[allow(clippy::wrong_self_convention)]
     fn is_sign_negative(self) -> bool;
     /// Returns the minimum of the two numbers.
     fn min(self, other: T) -> T;
@@ -900,7 +884,6 @@ mod fmath {
 macro_rules! impl_float {
     ($type:ident, $fXX:ident, $iXX:ident) => {
         // In this particular instance we want to directly compare floating point numbers.
-        #[allow(clippy::float_cmp)]
         impl Float<$type> for $type {
             #[inline]
             fn abs(self) -> $type {

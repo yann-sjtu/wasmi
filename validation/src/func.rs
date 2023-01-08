@@ -244,7 +244,6 @@ impl<'a> FunctionValidationContext<'a> {
                 };
 
                 // Ignore clippy as pop(..) != pop(..) + push_value(..) under some conditions
-                #[allow(clippy::branches_sharing_code)]
                 if self.frame_stack.len() == 1 {
                     // We are about to close the last frame.
 
@@ -275,7 +274,7 @@ impl<'a> FunctionValidationContext<'a> {
                 self.validate_br_if(depth)?;
             }
             BrTable(ref br_table_data) => {
-                self.validate_br_table(&*br_table_data.table, br_table_data.default)?;
+                self.validate_br_table(&br_table_data.table, br_table_data.default)?;
                 make_top_frame_polymorphic(&mut self.value_stack, &mut self.frame_stack);
             }
             Return => {

@@ -1,6 +1,6 @@
-use core::fmt::{self, Display};
-
 use crate::{GlobalType, MemoryType, ModuleError, TableType};
+use alloc::boxed::Box;
+use core::fmt::{self, Display};
 use wasmparser::ImportSectionEntryType;
 
 /// A [`Module`] import item.
@@ -94,16 +94,6 @@ impl Import {
             name: ImportName::new(module, field),
             kind,
         }
-    }
-
-    /// Returns the name of the imported item.
-    pub fn name(&self) -> &ImportName {
-        &self.name
-    }
-
-    /// Returns the kind of the imported item and its associated data.
-    pub fn kind(&self) -> &ImportKind {
-        &self.kind
     }
 
     /// Splits the [`Import`] into its raw parts.

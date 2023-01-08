@@ -1,4 +1,5 @@
 use crate::ModuleError;
+use alloc::{boxed::Box, vec::Vec};
 
 use super::{FuncIdx, InitExpr, TableIdx};
 
@@ -7,7 +8,7 @@ use super::{FuncIdx, InitExpr, TableIdx};
 /// [`Module`]: [`super::Module`]
 #[derive(Debug)]
 pub struct ElementSegment {
-    table_index: TableIdx,
+    _table_index: TableIdx,
     offset: InitExpr,
     items: Box<[FuncIdx]>,
 }
@@ -47,7 +48,7 @@ impl TryFrom<wasmparser::Element<'_>> for ElementSegment {
             .collect::<Result<Vec<_>, ModuleError>>()?
             .into_boxed_slice();
         Ok(ElementSegment {
-            table_index,
+            _table_index: table_index,
             offset,
             items,
         })
@@ -55,13 +56,6 @@ impl TryFrom<wasmparser::Element<'_>> for ElementSegment {
 }
 
 impl ElementSegment {
-    /// Returns the index of the [`Table`] manipulated by the [`ElementSegment`].
-    ///
-    /// [`Table`]: [`crate::Table`]
-    pub fn table_index(&self) -> TableIdx {
-        self.table_index
-    }
-
     /// Returns the offset expression of the [`ElementSegment`].
     pub fn offset(&self) -> &InitExpr {
         &self.offset
