@@ -781,7 +781,7 @@ impl Interpreter {
 
                 let global_ref = context.module().global_by_index(idx).unwrap();
                 let is_mutable = global_ref.is_mutable();
-                let vtype: VarType = global_ref.value_type().into_elements().into();
+                let vtype: VarType = global_ref.elements_value_type().into();
                 let value = from_value_internal_to_u64_with_typ(
                     vtype.into(),
                     ValueInternal::from(global_ref.get()),
@@ -810,7 +810,7 @@ impl Interpreter {
 
                 let global_ref = context.module().global_by_index(idx).unwrap();
                 let is_mutable = global_ref.is_mutable();
-                let vtype: VarType = global_ref.value_type().into_elements().into();
+                let vtype: VarType = global_ref.elements_value_type().into();
                 let value = from_value_internal_to_u64_with_typ(
                     vtype.into(),
                     ValueInternal::from(global_ref.get()),
