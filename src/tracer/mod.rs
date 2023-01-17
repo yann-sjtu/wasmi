@@ -96,11 +96,10 @@ impl Tracer {
         r
     }
 
-    fn lookup_host_plugin(&self, function_index: usize) -> HostFunctionDesc {
-        self.host_function_index_lookup
-            .get(&function_index)
-            .unwrap()
-            .clone()
+    fn lookup_host_plugin(&mut self, function_index: usize) -> HostFunctionDesc {
+       let res =  self.host_function_index_lookup
+            .get(&function_index);
+       res.unwrap().clone()
     }
 }
 
@@ -128,9 +127,18 @@ impl Tracer {
     pub(crate) fn push_global(&mut self, moid: u16, globalidx: u32, globalref: &GlobalRef) {
         let vtype = globalref.elements_value_type().into();
 
-        if let Some((_origin_moid, _origin_idx)) = self.lookup_global_instance(globalref) {
+        if let Some((orgin_moid_idx,origin_idx)) = self.lookup_global_instance(globalref) {
+            // TODO must support import global 
             // Import global does not support yet.
-            todo!()
+            self.imtable.push(
+                true,
+                globalref.is_mutable(),
+                orgin_moid_idx,
+                origin_idx as u32,
+                vtype,
+                from_value_internal_to_u64_with_typ(vtype, ValueInternal::from(globalref.get())),
+            )
+            
         } else {
             self.global_instance_lookup
                 .push((globalref.clone(), (moid, globalidx as u16)));
