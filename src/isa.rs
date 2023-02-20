@@ -415,9 +415,9 @@ impl<'a> Instruction<'a> {
                             };
 
                             BrTarget {
-                                drop: target.drop_keep.drop,
+                                drop: target.drop_keep.drop.into(),
                                 keep: keep_type,
-                                dst_pc: target.dst_pc,
+                                dst_pc: target.dst_pc.into(),
                             }
                         } else {
                             unreachable!()

@@ -37,6 +37,7 @@ use specs::{
     jtable::JumpTableEntry,
     mtable::{MemoryReadSize, MemoryStoreSize, VarType},
     step::StepInfo,
+    utils::common_range::CommonRange,
 };
 use std::rc::Rc;
 use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
@@ -330,9 +331,8 @@ impl Interpreter {
                             let nested_context = FunctionContext::new(nested_func.clone());
 
                             if let Some(tracer) = self.tracer.clone() {
-                                let callee_fid = {
-                                    tracer.clone().borrow().lookup_function(&nested_func) as u64
-                                };
+                                let callee_fid =
+                                    { tracer.clone().borrow().lookup_function(&nested_func) };
 
                                 let mut tracer = (*tracer).borrow_mut();
                                 let eid = tracer.eid();
@@ -344,9 +344,9 @@ impl Interpreter {
                                 );
 
                                 tracer.jtable.push(JumpTableEntry {
-                                    eid,
-                                    last_jump_eid,
-                                    callee_fid,
+                                    eid: eid.into(),
+                                    last_jump_eid: last_jump_eid.into(),
+                                    callee_fid: callee_fid.into(),
                                     inst: Box::new(inst.into()),
                                 });
 
@@ -814,7 +814,7 @@ impl Interpreter {
     ) -> StepInfo {
         match *instructions {
             isa::Instruction::GetLocal(depth, vtype) => StepInfo::GetLocal {
-                depth,
+                depth: depth.into(),
                 value: from_value_internal_to_u64_with_typ(vtype.into(), *self.value_stack.top()),
                 vtype: vtype.into(),
             },
@@ -826,7 +826,7 @@ impl Interpreter {
                 } = pre_status.unwrap()
                 {
                     StepInfo::SetLocal {
-                        depth,
+                        depth: depth.into(),
                         value: from_value_internal_to_u64_with_typ(vtype.into(), value),
                         vtype: vtype.into(),
                     }
@@ -835,7 +835,7 @@ impl Interpreter {
                 }
             }
             isa::Instruction::TeeLocal(depth, vtype) => StepInfo::TeeLocal {
-                depth,
+                depth: depth.into(),
                 value: from_value_internal_to_u64_with_typ(vtype.into(), *self.value_stack.top()),
                 vtype: vtype.into(),
             },
@@ -849,7 +849,7 @@ impl Interpreter {
                 );
 
                 StepInfo::GetGlobal {
-                    idx,
+                    idx: idx.into(),
                     vtype,
                     is_mutable,
                     value,
@@ -865,7 +865,7 @@ impl Interpreter {
                 );
 
                 StepInfo::SetGlobal {
-                    idx,
+                    idx: idx.into(),
                     vtype,
                     is_mutable,
                     value,
@@ -873,8 +873,8 @@ impl Interpreter {
             }
 
             isa::Instruction::Br(target) => StepInfo::Br {
-                dst_pc: target.dst_pc,
-                drop: target.drop_keep.drop,
+                dst_pc: target.dst_pc.into(),
+                drop: target.drop_keep.drop.into(),
                 keep: if let Keep::Single(t) = target.drop_keep.keep {
                     vec![t.into()]
                 } else {
@@ -892,8 +892,8 @@ impl Interpreter {
                 if let RunInstructionTracePre::BrIfEqz { value } = pre_status.unwrap() {
                     StepInfo::BrIfEqz {
                         condition: value,
-                        dst_pc: target.dst_pc,
-                        drop: target.drop_keep.drop,
+                        dst_pc: target.dst_pc.into(),
+                        drop: target.drop_keep.drop.into(),
                         keep: if let Keep::Single(t) = target.drop_keep.keep {
                             vec![t.into()]
                         } else {
@@ -915,8 +915,8 @@ impl Interpreter {
                 if let RunInstructionTracePre::BrIfNez { value } = pre_status.unwrap() {
                     StepInfo::BrIfNez {
                         condition: value,
-                        dst_pc: target.dst_pc,
-                        drop: target.drop_keep.drop,
+                        dst_pc: target.dst_pc.into(),
+                        drop: target.drop_keep.drop.into(),
                         keep: if let Keep::Single(t) = target.drop_keep.keep {
                             vec![t.into()]
                         } else {
@@ -937,9 +937,9 @@ impl Interpreter {
             isa::Instruction::BrTable(targets) => {
                 if let RunInstructionTracePre::BrTable { index } = pre_status.unwrap() {
                     StepInfo::BrTable {
-                        index,
-                        dst_pc: targets.get(index as u32).dst_pc,
-                        drop: targets.get(index as u32).drop_keep.drop,
+                        index: index as u32,
+                        dst_pc: targets.get(index as u32).dst_pc.into(),
+                        drop: targets.get(index as u32).drop_keep.drop.into(),
                         keep: if let Keep::Single(t) = targets.get(index as u32).drop_keep.keep {
                             vec![t.into()]
                         } else {
@@ -966,7 +966,7 @@ impl Interpreter {
                 }
 
                 StepInfo::Return {
-                    drop,
+                    drop: drop.into(),
                     keep: if let Keep::Single(t) = keep {
                         vec![t.into()]
                     } else {
@@ -1016,7 +1016,7 @@ impl Interpreter {
 
                     match &desc.ftype {
                         specs::types::FunctionType::WasmFunction => StepInfo::Call {
-                            index: desc.index_within_jtable,
+                            index: desc.index_within_jtable.into(),
                         },
                         specs::types::FunctionType::HostFunction {
                             plugin,
@@ -1048,7 +1048,7 @@ impl Interpreter {
                         }
                         specs::types::FunctionType::HostFunctionExternal { op, sig, .. } => {
                             StepInfo::ExternalHostCall {
-                                op: *op,
+                                op: CommonRange::from(*op as u32),
                                 value: match sig {
                                     ExternalHostCallSignature::Argument => {
                                         Some(from_value_internal_to_u64_with_typ(
@@ -1075,19 +1075,16 @@ impl Interpreter {
                 {
                     let tracer = self.tracer.clone().unwrap();
 
-                    let table = context
-                        .module()
-                        .table_by_index(DEFAULT_TABLE_INDEX)
-                        .unwrap();
+                    let table = context.module().table_by_index(table_idx).unwrap();
                     let func_ref = table.get(offset).unwrap().unwrap();
 
                     let func_idx = tracer.borrow().lookup_function(&func_ref);
 
                     StepInfo::CallIndirect {
-                        table_index: table_idx,
-                        type_index: type_idx,
-                        offset,
-                        func_index: func_idx,
+                        table_index: table_idx.into(),
+                        type_index: type_idx.into(),
+                        offset: offset.into(),
+                        func_index: func_idx.into(),
                     }
                 } else {
                     unreachable!()
@@ -1947,16 +1944,16 @@ impl Interpreter {
                         let last_jump_eid = tracer.last_jump_eid();
 
                         let inst_entry = InstructionTableEntry {
-                            fid: function,
-                            iid: pc as u16,
+                            fid: function.into(),
+                            iid: pc.into(),
                             opcode: instruction,
                         };
 
                         tracer.etable.push(
                             inst_entry,
-                            sp as u64,
-                            current_memory,
-                            last_jump_eid,
+                            (sp as u32).into(),
+                            (current_memory as u32).into(),
+                            last_jump_eid.into(),
                             post_status,
                         );
                     }

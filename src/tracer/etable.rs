@@ -4,6 +4,7 @@ use specs::{
     itable::InstructionTableEntry,
     mtable::{MemoryReadSize, MemoryStoreSize, VarType},
     step::StepInfo,
+    utils::common_range::CommonRange,
 };
 
 use crate::{runner::ValueInternal, DEFAULT_VALUE_STACK_LIMIT};
@@ -105,23 +106,23 @@ pub enum RunInstructionTracePre {
 }
 
 pub(crate) trait ETable {
-    fn get_latest_eid(&self) -> u64;
+    fn get_latest_eid(&self) -> u32;
 
     fn get_last_entry_mut(&mut self) -> Option<&mut EventTableEntry>;
 
     fn push(
         &mut self,
         inst: InstructionTableEntry,
-        sp: u64,
-        allocated_memory_pages: usize,
-        last_jump_eid: u64,
+        sp: CommonRange,
+        allocated_memory_pages: CommonRange,
+        last_jump_eid: CommonRange,
         step_info: StepInfo,
     ) -> EventTableEntry;
 }
 
 impl ETable for EventTable {
-    fn get_latest_eid(&self) -> u64 {
-        self.entries().last().unwrap().eid
+    fn get_latest_eid(&self) -> u32 {
+        *self.entries().last().unwrap().eid
     }
 
     fn get_last_entry_mut(&mut self) -> Option<&mut EventTableEntry> {
@@ -131,19 +132,20 @@ impl ETable for EventTable {
     fn push(
         &mut self,
         inst: InstructionTableEntry,
-        sp: u64,
-        allocated_memory_pages: usize,
-        last_jump_eid: u64,
+        sp: CommonRange,
+        allocated_memory_pages: CommonRange,
+        last_jump_eid: CommonRange,
         step_info: StepInfo,
     ) -> EventTableEntry {
-        let sp = (DEFAULT_VALUE_STACK_LIMIT as u64)
-            .checked_sub(sp)
+        let sp = (DEFAULT_VALUE_STACK_LIMIT as u32)
+            .checked_sub(*sp)
             .unwrap()
             .checked_sub(1)
-            .unwrap();
+            .unwrap()
+            .into();
 
         let eentry = EventTableEntry {
-            eid: self.entries().len() as u64 + 1,
+            eid: CommonRange::from(self.entries().len() as u32 + 1),
             sp,
             allocated_memory_pages,
             last_jump_eid,

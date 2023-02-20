@@ -1,14 +1,14 @@
 use specs::{
     imtable::{InitMemoryTable, InitMemoryTableEntry},
     mtable::{LocationType, VarType},
+    utils::common_range::CommonRange,
 };
 
 #[derive(Debug, Clone)]
 pub struct IMEntry {
     pub is_global: bool,
     pub is_mutable: bool,
-    pub module_instance_index: u16,
-    pub offset: u32,
+    pub offset: CommonRange,
     pub vtype: VarType,
     pub value: u64,
 }
@@ -22,7 +22,7 @@ impl Into<InitMemoryTableEntry> for IMEntry {
             } else {
                 LocationType::Heap
             },
-            offset: self.offset as u64,
+            offset: self.offset,
             vtype: self.vtype,
             value: self.value,
         }
@@ -48,7 +48,7 @@ impl IMTable {
             } else {
                 LocationType::Heap
             },
-            offset: offset as u64,
+            offset: CommonRange::from(offset),
             vtype,
             value,
         })

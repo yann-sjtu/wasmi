@@ -30,7 +30,7 @@ use core::{
     fmt,
 };
 use parity_wasm::elements::{External, InitExpr, Instruction, Internal, ResizableLimits, Type};
-use specs::configure_table::ConfigureTable;
+use specs::{configure_table::ConfigureTable, utils::common_range::CommonRange};
 use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
 
 /// Reference to a [`ModuleInstance`].
@@ -344,7 +344,7 @@ impl ModuleInstance {
                 if let Some(tracer) = tracer.clone() {
                     tracer
                         .borrow_mut()
-                        .push_type_of_func_ref(func_instance.clone(), ty.type_ref())
+                        .push_type_of_func_ref(func_instance.clone(), ty.type_ref().into())
                 }
 
                 instance.push_func(func_instance);
@@ -373,8 +373,8 @@ impl ModuleInstance {
                 let mut tracer = tracer.borrow_mut();
 
                 tracer.configure_table = ConfigureTable {
-                    init_memory_pages: memory_type.limits().initial() as usize,
-                    maximal_memory_pages: memory_type.limits().maximum().unwrap_or(65536) as usize,
+                    init_memory_pages: CommonRange::from(memory_type.limits().initial()),
+                    maximal_memory_pages: memory_type.limits().maximum().unwrap_or(65536),
                 };
             }
         }
@@ -486,10 +486,10 @@ impl ModuleInstance {
                     let type_idx = tracer.borrow().lookup_type_of_func_ref(&func);
 
                     tracer.borrow_mut().push_elem(
-                        DEFAULT_TABLE_INDEX,
-                        offset_val + j as u32,
-                        func_idx as u32,
-                        type_idx as u32,
+                        DEFAULT_TABLE_INDEX.into(),
+                        (offset_val + j as u32).into(),
+                        func_idx.into(),
+                        type_idx,
                     );
                 }
 
@@ -875,7 +875,7 @@ impl<'a> NotStartedModuleRef<'a> {
         self.loaded_module.module().start_section().is_some()
     }
 
-    pub fn lookup_function_by_name(&self, tracer: Rc<RefCell<Tracer>>, func_name: &str) -> u16 {
+    pub fn lookup_function_by_name(&self, tracer: Rc<RefCell<Tracer>>, func_name: &str) -> u32 {
         let func_ref = self.instance.func_by_name(func_name).unwrap();
 
         tracer.borrow().lookup_function(&func_ref)
