@@ -67,7 +67,16 @@
 //! - Reserved immediates are ignored for `call_indirect`, `current_memory`, `grow_memory`.
 //!
 
+use std::collections::HashMap;
+
 use alloc::vec::Vec;
+use parity_wasm::elements::ValueType;
+use specs::{
+    itable::{BinOp, BitOp, BrTarget, ConversionOp, Opcode, RelOp, ShiftOp, TestOp, UnaryOp},
+    mtable::{MemoryReadSize, MemoryStoreSize, VarType},
+};
+
+use crate::tracer::FuncDesc;
 
 /// Should we keep a value before "discarding" a stack frame?
 ///
@@ -78,7 +87,7 @@ pub enum Keep {
     None,
     /// Pop one value from the yet-to-be-discarded stack frame to the
     /// current stack frame.
-    Single,
+    Single(ValueType),
 }
 
 impl Keep {
@@ -86,7 +95,7 @@ impl Keep {
     pub fn count(&self) -> u32 {
         match *self {
             Keep::None => 0,
-            Keep::Single => 1,
+            Keep::Single(..) => 1,
         }
     }
 }
@@ -140,13 +149,13 @@ impl<'a> BrTargets<'a> {
 #[allow(clippy::upper_case_acronyms)]
 pub enum Instruction<'a> {
     /// Push a local variable or an argument from the specified depth.
-    GetLocal(u32),
+    GetLocal(u32, ValueType),
 
     /// Pop a value and put it in at the specified depth.
-    SetLocal(u32),
+    SetLocal(u32, ValueType),
 
     /// Copy a value to the specified depth.
-    TeeLocal(u32),
+    TeeLocal(u32, ValueType),
 
     /// Similar to the Wasm ones, but instead of a label depth
     /// they specify direct PC.
@@ -172,7 +181,7 @@ pub enum Instruction<'a> {
     CallIndirect(u32),
 
     Drop,
-    Select,
+    Select(ValueType),
 
     GetGlobal(u32),
     SetGlobal(u32),
@@ -339,6 +348,714 @@ pub enum Instruction<'a> {
     I64ReinterpretF64,
     F32ReinterpretI32,
     F64ReinterpretI64,
+}
+
+impl<'a> From<Instruction<'a>> for UnaryOp {
+    fn from(value: Instruction<'a>) -> Self {
+        match value {
+            Instruction::I32Clz | Instruction::I64Clz => UnaryOp::Clz,
+            Instruction::I32Ctz | Instruction::I64Ctz => UnaryOp::Ctz,
+            Instruction::I32Popcnt | Instruction::I64Popcnt => UnaryOp::Popcnt,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<'a> Instruction<'a> {
+    pub(crate) fn into(self, function_mapping: &HashMap<u32, FuncDesc>) -> Opcode {
+        match self {
+            Instruction::GetLocal(offset, typ) => Opcode::LocalGet {
+                offset: offset as u64,
+                vtype: typ.into(),
+            },
+            Instruction::SetLocal(offset, typ) => Opcode::LocalSet {
+                offset: offset as u64,
+                vtype: typ.into(),
+            },
+            Instruction::TeeLocal(offset, typ) => Opcode::LocalTee {
+                offset: offset as u64,
+                vtype: typ.into(),
+            },
+            Instruction::Br(Target { dst_pc, drop_keep }) => Opcode::Br {
+                drop: drop_keep.drop,
+                keep: if let Keep::Single(t) = drop_keep.keep {
+                    vec![t.into()]
+                } else {
+                    vec![]
+                },
+                dst_pc,
+            },
+            Instruction::BrIfEqz(Target { dst_pc, drop_keep }) => Opcode::BrIfEqz {
+                drop: drop_keep.drop,
+                keep: if let Keep::Single(t) = drop_keep.keep {
+                    vec![t.into()]
+                } else {
+                    vec![]
+                },
+                dst_pc,
+            },
+            Instruction::BrIfNez(Target { dst_pc, drop_keep }) => Opcode::BrIf {
+                drop: drop_keep.drop,
+                keep: if let Keep::Single(t) = drop_keep.keep {
+                    vec![t.into()]
+                } else {
+                    vec![]
+                },
+                dst_pc,
+            },
+            Instruction::BrTable(targets) => Opcode::BrTable {
+                targets: targets
+                    .stream
+                    .iter()
+                    .map(|t| {
+                        if let InstructionInternal::BrTableTarget(target) = t {
+                            let keep_type = match target.drop_keep.keep {
+                                Keep::None => vec![],
+                                Keep::Single(t) => vec![t.into()],
+                            };
+
+                            BrTarget {
+                                drop: target.drop_keep.drop,
+                                keep: keep_type,
+                                dst_pc: target.dst_pc,
+                            }
+                        } else {
+                            unreachable!()
+                        }
+                    })
+                    .collect(),
+            },
+            Instruction::Unreachable => Opcode::Unreachable,
+            Instruction::Return(drop_keep) => Opcode::Return {
+                drop: drop_keep.drop,
+                keep: if let Keep::Single(t) = drop_keep.keep {
+                    vec![t.into()]
+                } else {
+                    vec![]
+                },
+            },
+            Instruction::Call(func_index) => {
+                let func_desc = function_mapping.get(&func_index).unwrap();
+
+                match &func_desc.ftype {
+                    specs::types::FunctionType::WasmFunction => Opcode::Call {
+                        index: function_mapping
+                            .get(&func_index)
+                            .unwrap()
+                            .index_within_jtable,
+                    },
+                    specs::types::FunctionType::HostFunction {
+                        plugin,
+                        function_index,
+                        function_name,
+                        op_index_in_plugin,
+                    } => Opcode::InternalHostCall {
+                        plugin: *plugin,
+                        function_index: *function_index,
+                        function_name: function_name.clone(),
+                        op_index_in_plugin: *op_index_in_plugin,
+                    },
+                    specs::types::FunctionType::HostFunctionExternal { op, sig, .. } => {
+                        Opcode::ExternalHostCall { op: *op, sig: *sig }
+                    }
+                }
+            }
+            Instruction::CallIndirect(idx) => Opcode::CallIndirect { type_idx: idx },
+            Instruction::Drop => Opcode::Drop,
+            Instruction::Select(_) => Opcode::Select,
+            Instruction::GetGlobal(idx) => Opcode::GlobalGet { idx: idx as u64 },
+            Instruction::SetGlobal(idx) => Opcode::GlobalSet { idx: idx as u64 },
+            Instruction::I32Load(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryReadSize::U32,
+            },
+            Instruction::I64Load(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::I64,
+            },
+            Instruction::F32Load(_) => todo!(),
+            Instruction::F64Load(_) => todo!(),
+            Instruction::I32Load8S(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryReadSize::S8,
+            },
+            Instruction::I32Load8U(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryReadSize::U8,
+            },
+            Instruction::I32Load16S(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryReadSize::S16,
+            },
+            Instruction::I32Load16U(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryReadSize::U16,
+            },
+            Instruction::I64Load8S(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::S8,
+            },
+            Instruction::I64Load8U(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::U8,
+            },
+            Instruction::I64Load16S(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::S16,
+            },
+            Instruction::I64Load16U(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::U16,
+            },
+            Instruction::I64Load32S(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::S32,
+            },
+            Instruction::I64Load32U(offset) => Opcode::Load {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryReadSize::U32,
+            },
+            Instruction::I32Store(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryStoreSize::Byte32,
+            },
+            Instruction::I64Store(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryStoreSize::Byte64,
+            },
+            Instruction::F32Store(_) => todo!(),
+            Instruction::F64Store(_) => todo!(),
+            Instruction::I32Store8(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryStoreSize::Byte8,
+            },
+            Instruction::I32Store16(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I32,
+                size: MemoryStoreSize::Byte16,
+            },
+            Instruction::I64Store8(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryStoreSize::Byte8,
+            },
+            Instruction::I64Store16(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryStoreSize::Byte16,
+            },
+            Instruction::I64Store32(offset) => Opcode::Store {
+                offset,
+                vtype: VarType::I64,
+                size: MemoryStoreSize::Byte32,
+            },
+            Instruction::CurrentMemory => Opcode::MemorySize,
+            Instruction::GrowMemory => Opcode::MemoryGrow,
+            Instruction::I32Const(v) => Opcode::Const {
+                vtype: VarType::I32,
+                value: v as u32 as u64,
+            },
+            Instruction::I64Const(v) => Opcode::Const {
+                vtype: VarType::I64,
+                value: v as u64,
+            },
+            Instruction::F32Const(_) => todo!(),
+            Instruction::F64Const(_) => todo!(),
+            Instruction::I32Eqz => Opcode::Test {
+                class: TestOp::Eqz,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Eq => Opcode::Rel {
+                class: RelOp::Eq,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Ne => Opcode::Rel {
+                class: RelOp::Ne,
+                vtype: VarType::I32,
+            },
+            Instruction::I32LtS => Opcode::Rel {
+                class: RelOp::SignedLt,
+                vtype: VarType::I32,
+            },
+            Instruction::I32LtU => Opcode::Rel {
+                class: RelOp::UnsignedLt,
+                vtype: VarType::I32,
+            },
+            Instruction::I32GtS => Opcode::Rel {
+                class: RelOp::SignedGt,
+                vtype: VarType::I32,
+            },
+            Instruction::I32GtU => Opcode::Rel {
+                class: RelOp::UnsignedGt,
+                vtype: VarType::I32,
+            },
+            Instruction::I32LeS => Opcode::Rel {
+                class: RelOp::SignedLe,
+                vtype: VarType::I32,
+            },
+            Instruction::I32LeU => Opcode::Rel {
+                class: RelOp::UnsignedLe,
+                vtype: VarType::I32,
+            },
+            Instruction::I32GeS => Opcode::Rel {
+                class: RelOp::SignedGe,
+                vtype: VarType::I32,
+            },
+            Instruction::I32GeU => Opcode::Rel {
+                class: RelOp::UnsignedGe,
+                vtype: VarType::I32,
+            },
+            Instruction::I64Eqz => Opcode::Test {
+                class: TestOp::Eqz,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Eq => Opcode::Rel {
+                class: RelOp::Eq,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Ne => Opcode::Rel {
+                class: RelOp::Ne,
+                vtype: VarType::I64,
+            },
+            Instruction::I64LtS => Opcode::Rel {
+                class: RelOp::SignedLt,
+                vtype: VarType::I64,
+            },
+            Instruction::I64LtU => Opcode::Rel {
+                class: RelOp::UnsignedLt,
+                vtype: VarType::I64,
+            },
+            Instruction::I64GtS => Opcode::Rel {
+                class: RelOp::SignedGt,
+                vtype: VarType::I64,
+            },
+            Instruction::I64GtU => Opcode::Rel {
+                class: RelOp::UnsignedGt,
+                vtype: VarType::I64,
+            },
+            Instruction::I64LeS => Opcode::Rel {
+                class: RelOp::SignedLe,
+                vtype: VarType::I64,
+            },
+            Instruction::I64LeU => Opcode::Rel {
+                class: RelOp::UnsignedLe,
+                vtype: VarType::I64,
+            },
+            Instruction::I64GeS => Opcode::Rel {
+                class: RelOp::SignedGe,
+                vtype: VarType::I64,
+            },
+            Instruction::I64GeU => Opcode::Rel {
+                class: RelOp::UnsignedGe,
+                vtype: VarType::I64,
+            },
+            Instruction::F32Eq => todo!(),
+            Instruction::F32Ne => todo!(),
+            Instruction::F32Lt => todo!(),
+            Instruction::F32Gt => todo!(),
+            Instruction::F32Le => todo!(),
+            Instruction::F32Ge => todo!(),
+            Instruction::F64Eq => todo!(),
+            Instruction::F64Ne => todo!(),
+            Instruction::F64Lt => todo!(),
+            Instruction::F64Gt => todo!(),
+            Instruction::F64Le => todo!(),
+            Instruction::F64Ge => todo!(),
+            Instruction::I32Clz => Opcode::Unary {
+                class: UnaryOp::Clz,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Ctz => Opcode::Unary {
+                class: UnaryOp::Ctz,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Popcnt => Opcode::Unary {
+                class: UnaryOp::Popcnt,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Add => Opcode::Bin {
+                class: BinOp::Add,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Sub => Opcode::Bin {
+                class: BinOp::Sub,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Mul => Opcode::Bin {
+                class: BinOp::Mul,
+                vtype: VarType::I32,
+            },
+            Instruction::I32DivS => Opcode::Bin {
+                class: BinOp::SignedDiv,
+                vtype: VarType::I32,
+            },
+            Instruction::I32DivU => Opcode::Bin {
+                class: BinOp::UnsignedDiv,
+                vtype: VarType::I32,
+            },
+            Instruction::I32RemS => Opcode::Bin {
+                class: BinOp::SignedRem,
+                vtype: VarType::I32,
+            },
+            Instruction::I32RemU => Opcode::Bin {
+                class: BinOp::UnsignedRem,
+                vtype: VarType::I32,
+            },
+            Instruction::I32And => Opcode::BinBit {
+                class: BitOp::And,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Or => Opcode::BinBit {
+                class: BitOp::Or,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Xor => Opcode::BinBit {
+                class: BitOp::Xor,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Shl => Opcode::BinShift {
+                class: ShiftOp::Shl,
+                vtype: VarType::I32,
+            },
+            Instruction::I32ShrS => Opcode::BinShift {
+                class: ShiftOp::SignedShr,
+                vtype: VarType::I32,
+            },
+            Instruction::I32ShrU => Opcode::BinShift {
+                class: ShiftOp::UnsignedShr,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Rotl => Opcode::BinShift {
+                class: ShiftOp::Rotl,
+                vtype: VarType::I32,
+            },
+            Instruction::I32Rotr => Opcode::BinShift {
+                class: ShiftOp::Rotr,
+                vtype: VarType::I32,
+            },
+            Instruction::I64Clz => Opcode::Unary {
+                class: UnaryOp::Clz,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Ctz => Opcode::Unary {
+                class: UnaryOp::Ctz,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Popcnt => Opcode::Unary {
+                class: UnaryOp::Popcnt,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Add => Opcode::Bin {
+                class: BinOp::Add,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Sub => Opcode::Bin {
+                class: BinOp::Sub,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Mul => Opcode::Bin {
+                class: BinOp::Mul,
+                vtype: VarType::I64,
+            },
+            Instruction::I64DivS => Opcode::Bin {
+                class: BinOp::SignedDiv,
+                vtype: VarType::I64,
+            },
+            Instruction::I64DivU => Opcode::Bin {
+                class: BinOp::UnsignedDiv,
+                vtype: VarType::I64,
+            },
+            Instruction::I64RemS => Opcode::Bin {
+                class: BinOp::SignedRem,
+                vtype: VarType::I64,
+            },
+            Instruction::I64RemU => Opcode::Bin {
+                class: BinOp::UnsignedRem,
+                vtype: VarType::I64,
+            },
+            Instruction::I64And => Opcode::BinBit {
+                class: BitOp::And,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Or => Opcode::BinBit {
+                class: BitOp::Or,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Xor => Opcode::BinBit {
+                class: BitOp::Xor,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Shl => Opcode::BinShift {
+                class: ShiftOp::Shl,
+                vtype: VarType::I64,
+            },
+            Instruction::I64ShrS => Opcode::BinShift {
+                class: ShiftOp::SignedShr,
+                vtype: VarType::I64,
+            },
+            Instruction::I64ShrU => Opcode::BinShift {
+                class: ShiftOp::UnsignedShr,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Rotl => Opcode::BinShift {
+                class: ShiftOp::Rotl,
+                vtype: VarType::I64,
+            },
+            Instruction::I64Rotr => Opcode::BinShift {
+                class: ShiftOp::Rotr,
+                vtype: VarType::I64,
+            },
+            Instruction::F32Abs => todo!(),
+            Instruction::F32Neg => todo!(),
+            Instruction::F32Ceil => todo!(),
+            Instruction::F32Floor => todo!(),
+            Instruction::F32Trunc => todo!(),
+            Instruction::F32Nearest => todo!(),
+            Instruction::F32Sqrt => todo!(),
+            Instruction::F32Add => todo!(),
+            Instruction::F32Sub => todo!(),
+            Instruction::F32Mul => todo!(),
+            Instruction::F32Div => todo!(),
+            Instruction::F32Min => todo!(),
+            Instruction::F32Max => todo!(),
+            Instruction::F32Copysign => todo!(),
+            Instruction::F64Abs => todo!(),
+            Instruction::F64Neg => todo!(),
+            Instruction::F64Ceil => todo!(),
+            Instruction::F64Floor => todo!(),
+            Instruction::F64Trunc => todo!(),
+            Instruction::F64Nearest => todo!(),
+            Instruction::F64Sqrt => todo!(),
+            Instruction::F64Add => todo!(),
+            Instruction::F64Sub => todo!(),
+            Instruction::F64Mul => todo!(),
+            Instruction::F64Div => todo!(),
+            Instruction::F64Min => todo!(),
+            Instruction::F64Max => todo!(),
+            Instruction::F64Copysign => todo!(),
+            Instruction::I32WrapI64 => Opcode::Conversion {
+                class: ConversionOp::I32WrapI64,
+            },
+            Instruction::I32TruncSF32 => todo!(),
+            Instruction::I32TruncUF32 => todo!(),
+            Instruction::I32TruncSF64 => todo!(),
+            Instruction::I32TruncUF64 => todo!(),
+            Instruction::I64ExtendSI32 => Opcode::Conversion {
+                class: ConversionOp::I64ExtendI32s,
+            },
+            Instruction::I64ExtendUI32 => Opcode::Conversion {
+                class: ConversionOp::I64ExtendI32u,
+            },
+            Instruction::I64TruncSF32 => todo!(),
+            Instruction::I64TruncUF32 => todo!(),
+            Instruction::I64TruncSF64 => todo!(),
+            Instruction::I64TruncUF64 => todo!(),
+            Instruction::F32ConvertSI32 => todo!(),
+            Instruction::F32ConvertUI32 => todo!(),
+            Instruction::F32ConvertSI64 => todo!(),
+            Instruction::F32ConvertUI64 => todo!(),
+            Instruction::F32DemoteF64 => todo!(),
+            Instruction::F64ConvertSI32 => todo!(),
+            Instruction::F64ConvertUI32 => todo!(),
+            Instruction::F64ConvertSI64 => todo!(),
+            Instruction::F64ConvertUI64 => todo!(),
+            Instruction::F64PromoteF32 => todo!(),
+            Instruction::I32ReinterpretF32 => todo!(),
+            Instruction::I64ReinterpretF64 => todo!(),
+            Instruction::F32ReinterpretI32 => todo!(),
+            Instruction::F64ReinterpretI64 => todo!(),
+        }
+    }
+}
+
+impl<'a> Into<u32> for Instruction<'a> {
+    fn into(self) -> u32 {
+        match self {
+            Instruction::GetLocal(..) => 0,
+            Instruction::SetLocal(..) => 1,
+            Instruction::TeeLocal(..) => 2,
+            Instruction::Br(_) => 3,
+            Instruction::BrIfEqz(_) => 4,
+            Instruction::BrIfNez(_) => 5,
+            Instruction::BrTable(_) => 6,
+            Instruction::Unreachable => 7,
+            Instruction::Return(..) => 8,
+            Instruction::Call(_) => 9,
+            Instruction::CallIndirect(_) => 10,
+            Instruction::Drop => 11,
+            Instruction::Select(..) => 12,
+            Instruction::GetGlobal(_) => 13,
+            Instruction::SetGlobal(_) => 14,
+            Instruction::I32Load(_) => 15,
+
+            Instruction::I64Load(_) => 16,
+            Instruction::F32Load(_) => 17,
+            Instruction::F64Load(_) => 18,
+            Instruction::I32Load8S(_) => 19,
+            Instruction::I32Load8U(_) => 20,
+            Instruction::I32Load16S(_) => 21,
+            Instruction::I32Load16U(_) => 22,
+            Instruction::I64Load8S(_) => 23,
+            Instruction::I64Load8U(_) => 24,
+            Instruction::I64Load16S(_) => 25,
+            Instruction::I64Load16U(_) => 26,
+            Instruction::I64Load32S(_) => 27,
+            Instruction::I64Load32U(_) => 28,
+            Instruction::I32Store(_) => 29,
+            Instruction::I64Store(_) => 30,
+            Instruction::F32Store(_) => 31,
+            Instruction::F64Store(_) => 32,
+            Instruction::I32Store8(_) => 33,
+            Instruction::I32Store16(_) => 34,
+            Instruction::I64Store8(_) => 35,
+            Instruction::I64Store16(_) => 36,
+            Instruction::I64Store32(_) => 37,
+            Instruction::CurrentMemory => 38,
+            Instruction::GrowMemory => 39,
+            Instruction::I32Const(_) => 40,
+            Instruction::I64Const(_) => 41,
+            Instruction::F32Const(_) => 42,
+            Instruction::F64Const(_) => 43,
+            Instruction::I32Eqz => 44,
+            Instruction::I32Eq => 45,
+            Instruction::I32Ne => 46,
+            Instruction::I32LtS => 47,
+            Instruction::I32LtU => 48,
+            Instruction::I32GtS => 49,
+            Instruction::I32GtU => 50,
+            Instruction::I32LeS => 51,
+            Instruction::I32LeU => 52,
+            Instruction::I32GeS => 53,
+            Instruction::I32GeU => 54,
+            Instruction::I64Eqz => 55,
+            Instruction::I64Eq => 56,
+            Instruction::I64Ne => 57,
+            Instruction::I64LtS => 58,
+            Instruction::I64LtU => 59,
+            Instruction::I64GtS => 60,
+            Instruction::I64GtU => 61,
+            Instruction::I64LeS => 62,
+            Instruction::I64LeU => 63,
+            Instruction::I64GeS => 64,
+            Instruction::I64GeU => 65,
+            Instruction::F32Eq => 66,
+            Instruction::F32Ne => 67,
+            Instruction::F32Lt => 68,
+            Instruction::F32Gt => 69,
+            Instruction::F32Le => 70,
+            Instruction::F32Ge => 71,
+            Instruction::F64Eq => 72,
+            Instruction::F64Ne => 73,
+            Instruction::F64Lt => 74,
+            Instruction::F64Gt => 75,
+            Instruction::F64Le => 76,
+            Instruction::F64Ge => 77,
+            Instruction::I32Clz => 78,
+            Instruction::I32Ctz => 79,
+            Instruction::I32Popcnt => 80,
+            Instruction::I32Add => 81,
+            Instruction::I32Sub => 82,
+            Instruction::I32Mul => 83,
+            Instruction::I32DivS => 84,
+            Instruction::I32DivU => 85,
+            Instruction::I32RemS => 86,
+            Instruction::I32RemU => 87,
+            Instruction::I32And => 88,
+            Instruction::I32Or => 89,
+            Instruction::I32Xor => 90,
+            Instruction::I32Shl => 91,
+            Instruction::I32ShrS => 92,
+            Instruction::I32ShrU => 93,
+            Instruction::I32Rotl => 94,
+            Instruction::I32Rotr => 95,
+            Instruction::I64Clz => 96,
+            Instruction::I64Ctz => 97,
+            Instruction::I64Popcnt => 98,
+            Instruction::I64Add => 99,
+            Instruction::I64Sub => 100,
+            Instruction::I64Mul => 101,
+            Instruction::I64DivS => 102,
+            Instruction::I64DivU => 103,
+            Instruction::I64RemS => 104,
+            Instruction::I64RemU => 105,
+            Instruction::I64And => 106,
+            Instruction::I64Or => 107,
+            Instruction::I64Xor => 108,
+            Instruction::I64Shl => 109,
+            Instruction::I64ShrS => 110,
+            Instruction::I64ShrU => 111,
+            Instruction::I64Rotl => 112,
+            Instruction::I64Rotr => 113,
+            Instruction::F32Abs => 114,
+            Instruction::F32Neg => 115,
+            Instruction::F32Ceil => 116,
+            Instruction::F32Floor => 117,
+            Instruction::F32Trunc => 118,
+            Instruction::F32Nearest => 119,
+            Instruction::F32Sqrt => 120,
+            Instruction::F32Add => 121,
+            Instruction::F32Sub => 122,
+            Instruction::F32Mul => 123,
+            Instruction::F32Div => 124,
+            Instruction::F32Min => 125,
+            Instruction::F32Max => 126,
+            Instruction::F32Copysign => 127,
+            Instruction::F64Abs => 128,
+            Instruction::F64Neg => 129,
+            Instruction::F64Ceil => 130,
+            Instruction::F64Floor => 131,
+            Instruction::F64Trunc => 132,
+            Instruction::F64Nearest => 133,
+            Instruction::F64Sqrt => 134,
+            Instruction::F64Add => 135,
+            Instruction::F64Sub => 136,
+            Instruction::F64Mul => 137,
+            Instruction::F64Div => 138,
+            Instruction::F64Min => 139,
+            Instruction::F64Max => 140,
+            Instruction::F64Copysign => 141,
+            Instruction::I32WrapI64 => 142,
+            Instruction::I32TruncSF32 => 143,
+            Instruction::I32TruncUF32 => 144,
+            Instruction::I32TruncSF64 => 145,
+            Instruction::I32TruncUF64 => 146,
+            Instruction::I64ExtendSI32 => 147,
+            Instruction::I64ExtendUI32 => 148,
+            Instruction::I64TruncSF32 => 149,
+            Instruction::I64TruncUF32 => 150,
+            Instruction::I64TruncSF64 => 151,
+            Instruction::I64TruncUF64 => 152,
+            Instruction::F32ConvertSI32 => 153,
+            Instruction::F32ConvertUI32 => 154,
+            Instruction::F32ConvertSI64 => 155,
+            Instruction::F32ConvertUI64 => 156,
+            Instruction::F32DemoteF64 => 157,
+            Instruction::F64ConvertSI32 => 158,
+            Instruction::F64ConvertUI32 => 159,
+            Instruction::F64ConvertSI64 => 160,
+            Instruction::F64ConvertUI64 => 161,
+            Instruction::F64PromoteF32 => 162,
+            Instruction::I32ReinterpretF32 => 163,
+            Instruction::I64ReinterpretF64 => 164,
+            Instruction::F32ReinterpretI32 => 165,
+            Instruction::F64ReinterpretI64 => 166,
+        }
+    }
 }
 
 /// The internally-stored instruction type. This differs from `Instruction` in that the `BrTable`
@@ -352,9 +1069,9 @@ pub enum Instruction<'a> {
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::upper_case_acronyms)]
 pub(crate) enum InstructionInternal {
-    GetLocal(u32),
-    SetLocal(u32),
-    TeeLocal(u32),
+    GetLocal(u32, ValueType),
+    SetLocal(u32, ValueType),
+    TeeLocal(u32, ValueType),
     Br(Target),
     BrIfEqz(Target),
     BrIfNez(Target),
@@ -368,7 +1085,7 @@ pub(crate) enum InstructionInternal {
     CallIndirect(u32),
 
     Drop,
-    Select,
+    Select(ValueType),
 
     GetGlobal(u32),
     SetGlobal(u32),
@@ -537,9 +1254,9 @@ pub(crate) enum InstructionInternal {
     F64ReinterpretI64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Instructions {
-    vec: Vec<InstructionInternal>,
+    pub(crate) vec: Vec<InstructionInternal>,
 }
 
 impl Instructions {
@@ -600,9 +1317,9 @@ impl<'a> Iterator for InstructionIter<'a> {
         let internal = self.instructions.get(self.position as usize)?;
 
         let out = match *internal {
-            InstructionInternal::GetLocal(x) => Instruction::GetLocal(x),
-            InstructionInternal::SetLocal(x) => Instruction::SetLocal(x),
-            InstructionInternal::TeeLocal(x) => Instruction::TeeLocal(x),
+            InstructionInternal::GetLocal(x, typ) => Instruction::GetLocal(x, typ),
+            InstructionInternal::SetLocal(x, typ) => Instruction::SetLocal(x, typ),
+            InstructionInternal::TeeLocal(x, typ) => Instruction::TeeLocal(x, typ),
             InstructionInternal::Br(x) => Instruction::Br(x),
             InstructionInternal::BrIfEqz(x) => Instruction::BrIfEqz(x),
             InstructionInternal::BrIfNez(x) => Instruction::BrIfNez(x),
@@ -624,7 +1341,7 @@ impl<'a> Iterator for InstructionIter<'a> {
             InstructionInternal::CallIndirect(x) => Instruction::CallIndirect(x),
 
             InstructionInternal::Drop => Instruction::Drop,
-            InstructionInternal::Select => Instruction::Select,
+            InstructionInternal::Select(vtype) => Instruction::Select(vtype),
 
             InstructionInternal::GetGlobal(x) => Instruction::GetGlobal(x),
             InstructionInternal::SetGlobal(x) => Instruction::SetGlobal(x),

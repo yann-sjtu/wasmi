@@ -8,6 +8,7 @@ use crate::{
     nan_preserving_float::{F32, F64},
     runner::StackRecycler,
     table::TableRef,
+    tracer::Tracer,
     types::{GlobalDescriptor, MemoryDescriptor, TableDescriptor},
     Error,
     MemoryInstance,
@@ -29,6 +30,7 @@ use core::{
     fmt,
 };
 use parity_wasm::elements::{External, InitExpr, Instruction, Internal, ResizableLimits, Type};
+use specs::configure_table::ConfigureTable;
 use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
 
 /// Reference to a [`ModuleInstance`].
@@ -44,7 +46,7 @@ use validation::{DEFAULT_MEMORY_INDEX, DEFAULT_TABLE_INDEX};
 /// should be retained.
 ///
 /// [`ModuleInstance`]: struct.ModuleInstance.html
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ModuleRef(pub(crate) Rc<ModuleInstance>);
 
 impl ::core::ops::Deref for ModuleRef {
@@ -56,6 +58,7 @@ impl ::core::ops::Deref for ModuleRef {
 
 /// An external value is the runtime representation of an entity
 /// that can be imported or exported.
+#[derive(PartialEq)]
 pub enum ExternVal {
     /// [Function][`FuncInstance`].
     ///
@@ -162,9 +165,9 @@ impl ExternVal {
 /// [`TableInstance`]: struct.TableInstance.html
 /// [`GlobalInstance`]: struct.GlobalInstance.html
 /// [`invoke_export`]: #method.invoke_export
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ModuleInstance {
-    signatures: RefCell<Vec<Rc<Signature>>>,
+    pub(crate) signatures: RefCell<Vec<Rc<Signature>>>,
     tables: RefCell<Vec<TableRef>>,
     funcs: RefCell<Vec<FuncRef>>,
     memories: RefCell<Vec<MemoryRef>>,
@@ -237,6 +240,7 @@ impl ModuleInstance {
     fn alloc_module<'i, I: Iterator<Item = &'i ExternVal>>(
         loaded_module: &Module,
         extern_vals: I,
+        tracer: Option<Rc<RefCell<Tracer>>>,
     ) -> Result<ModuleRef, Error> {
         let module = loaded_module.module();
         let instance = ModuleRef(Rc::new(ModuleInstance::default()));
@@ -336,6 +340,13 @@ impl ModuleInstance {
                 };
                 let func_instance =
                     FuncInstance::alloc_internal(Rc::downgrade(&instance.0), signature, func_body);
+
+                if let Some(tracer) = tracer.clone() {
+                    tracer
+                        .borrow_mut()
+                        .push_type_of_func_ref(func_instance.clone(), ty.type_ref())
+                }
+
                 instance.push_func(func_instance);
             }
         }
@@ -357,6 +368,15 @@ impl ModuleInstance {
             let memory = MemoryInstance::alloc(initial, maximum)
                 .expect("Due to validation `initial` and `maximum` should be valid");
             instance.push_memory(memory);
+
+            if let Some(tracer) = tracer.clone() {
+                let mut tracer = tracer.borrow_mut();
+
+                tracer.configure_table = ConfigureTable {
+                    init_memory_pages: memory_type.limits().initial(),
+                    maximal_memory_pages: memory_type.limits().maximum().unwrap_or(65536),
+                };
+            }
         }
 
         for global_entry in module
@@ -416,10 +436,17 @@ impl ModuleInstance {
     pub fn with_externvals<'a, 'i, I: Iterator<Item = &'i ExternVal>>(
         loaded_module: &'a Module,
         extern_vals: I,
+        tracer: Option<Rc<RefCell<Tracer>>>,
     ) -> Result<NotStartedModuleRef<'a>, Error> {
         let module = loaded_module.module();
 
-        let module_ref = ModuleInstance::alloc_module(loaded_module, extern_vals)?;
+        let module_ref = ModuleInstance::alloc_module(loaded_module, extern_vals, tracer.clone())?;
+
+        if let Some(tracer) = tracer.clone() {
+            tracer
+                .borrow_mut()
+                .register_module_instance(loaded_module, &module_ref);
+        }
 
         for element_segment in module
             .elements_section()
@@ -454,6 +481,18 @@ impl ModuleInstance {
                     .func_by_index(*func_idx)
                     .expect("Due to validation funcs from element segments should exists");
 
+                if let Some(tracer) = tracer.clone() {
+                    let func_idx = tracer.borrow().lookup_function(&func);
+                    let type_idx = tracer.borrow().lookup_type_of_func_ref(&func);
+
+                    tracer.borrow_mut().push_elem(
+                        DEFAULT_TABLE_INDEX,
+                        offset_val + j as u32,
+                        func_idx as u32,
+                        type_idx as u32,
+                    );
+                }
+
                 table_inst.set(offset_val + j as u32, Some(func))?;
             }
         }
@@ -472,6 +511,18 @@ impl ModuleInstance {
                 .memory_by_index(DEFAULT_MEMORY_INDEX)
                 .expect("Due to validation default memory should exists");
             memory_inst.set(offset_val, data_segment.value())?;
+        }
+
+        if let Some(tracer) = tracer {
+            let mut tracer = tracer.borrow_mut();
+
+            for (globalidx, globalref) in module_ref.globals().iter().enumerate() {
+                tracer.push_global(globalidx as u32, globalref);
+            }
+
+            if let Some(memory_ref) = module_ref.memory_by_index(DEFAULT_MEMORY_INDEX) {
+                tracer.push_init_memory(memory_ref)
+            }
         }
 
         Ok(NotStartedModuleRef {
@@ -543,6 +594,7 @@ impl ModuleInstance {
     pub fn new<'m, I: ImportResolver>(
         loaded_module: &'m Module,
         imports: &I,
+        tracer: Option<Rc<RefCell<Tracer>>>,
     ) -> Result<NotStartedModuleRef<'m>, Error> {
         let module = loaded_module.module();
 
@@ -582,7 +634,9 @@ impl ModuleInstance {
             extern_vals.push(extern_val);
         }
 
-        Self::with_externvals(loaded_module, extern_vals.iter())
+        let module_ref = Self::with_externvals(loaded_module, extern_vals.iter(), tracer.clone());
+
+        module_ref
     }
 
     /// Invoke exported function by a name.
@@ -640,8 +694,25 @@ impl ModuleInstance {
         externals: &mut E,
     ) -> Result<Option<RuntimeValue>, Error> {
         let func_instance = self.func_by_name(func_name)?;
-
         FuncInstance::invoke(&func_instance, args, externals).map_err(Error::Trap)
+    }
+
+    pub fn invoke_export_trace<E: Externals>(
+        &self,
+        func_name: &str,
+        args: &[RuntimeValue],
+        externals: &mut E,
+        tracer: Rc<RefCell<Tracer>>,
+    ) -> Result<Option<RuntimeValue>, Error> {
+        let func_instance = self.func_by_name(func_name)?;
+
+        {
+            let mut tracer = tracer.borrow_mut();
+
+            tracer.last_jump_eid.push(0);
+        }
+
+        FuncInstance::invoke_trace(&func_instance, args, externals, tracer).map_err(Error::Trap)
     }
 
     /// Invoke exported function by a name using recycled stacks.
@@ -744,6 +815,31 @@ impl<'a> NotStartedModuleRef<'a> {
     /// # Errors
     ///
     /// Returns `Err` if start function traps.
+    pub fn run_start_tracer<E: Externals>(
+        self,
+        state: &mut E,
+        tracer: Rc<RefCell<Tracer>>,
+    ) -> Result<ModuleRef, Trap> {
+        {
+            let mut tracer = tracer.borrow_mut();
+            tracer.last_jump_eid.push(0);
+        }
+
+        if let Some(start_fn_idx) = self.loaded_module.module().start_section() {
+            let start_func = self
+                .instance
+                .func_by_index(start_fn_idx)
+                .expect("Due to validation start function should exists");
+            FuncInstance::invoke_trace(&start_func, &[], state, tracer)?;
+        }
+        Ok(self.instance)
+    }
+
+    /// Executes `start` function (if any) and returns fully instantiated module.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if start function traps.
     pub fn run_start_with_stack<E: Externals>(
         self,
         state: &mut E,
@@ -777,6 +873,12 @@ impl<'a> NotStartedModuleRef<'a> {
     /// Returns `true` if it has a `start` function.
     pub fn has_start(&self) -> bool {
         self.loaded_module.module().start_section().is_some()
+    }
+
+    pub fn lookup_function_by_name(&self, tracer: Rc<RefCell<Tracer>>, func_name: &str) -> u32 {
+        let func_ref = self.instance.func_by_name(func_name).unwrap();
+
+        tracer.borrow().lookup_function(&func_ref)
     }
 }
 
@@ -859,7 +961,8 @@ mod tests {
 				(start $f))
 			"#,
         );
-        let module = ModuleInstance::new(&module_with_start, &ImportsBuilder::default()).unwrap();
+        let module =
+            ModuleInstance::new(&module_with_start, &ImportsBuilder::default(), None).unwrap();
         assert!(!module.has_start());
         module.assert_no_start();
     }
@@ -881,6 +984,7 @@ mod tests {
                 0
             ),)]
             .iter(),
+            None,
         )
         .is_ok());
 
@@ -892,11 +996,14 @@ mod tests {
                 ExternVal::Func(FuncInstance::alloc_host(Signature::new(&[][..], None), 1)),
             ]
             .iter(),
+            None,
         )
         .is_err());
 
         // externval vector is shorter than import count.
-        assert!(ModuleInstance::with_externvals(&module_with_single_import, [].iter(),).is_err());
+        assert!(
+            ModuleInstance::with_externvals(&module_with_single_import, [].iter(), None).is_err()
+        );
 
         // externval vector has an unexpected type.
         assert!(ModuleInstance::with_externvals(
@@ -906,6 +1013,7 @@ mod tests {
                 0
             ),)]
             .iter(),
+            None,
         )
         .is_err());
     }
